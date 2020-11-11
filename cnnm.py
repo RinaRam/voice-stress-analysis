@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import librosa.display
 from IPython.display import Audio
 import numpy as np
+from sklearn.dummy import DummyClassifier
 import tensorflow as tf
 from matplotlib.pyplot import specgram
 import pandas as pd
@@ -13,8 +14,9 @@ import sys
 import warnings
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+from sklearn import tree
 import tensorflow.keras
-from tensorflow.keras.models import Sequential
+from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Conv1D, MaxPooling1D, AveragePooling1D
 from tensorflow.keras.layers import Input, Flatten, Dropout, Activation, BatchNormalization, Dense
 from sklearn.model_selection import GridSearchCV
@@ -212,6 +214,7 @@ def ftr_extr():
     df_combined.drop(columns='path',inplace=True)
     df_combined.head()
     
+    
 def data_prep():
     train,test = train_test_split(df_combined, test_size=0.2, random_state=0, stratify=df_combined[['emotion','gender','actor']])
     X_train = train.iloc[:, 3:]
@@ -220,3 +223,72 @@ def data_prep():
     X_test = test.iloc[:,3:]
     y_test = test.iloc[:,:2].drop(columns=['gender'])
     print(X_test.shape)
+    mean = np.mean(X_train, axis=0)
+    std = np.std(X_train, axis=0)
+    X_train = (X_train - mean)/std
+    X_test = (X_test - mean)/std
+    X_train = np.array(X_train)
+    y_train = np.array(y_train)
+    X_test = np.array(X_test)
+    y_test = np.array(y_test)
+    lb = LabelEncoder()
+    y_train = to_categorical(lb.fit_transform(y_train))
+    y_test = to_categorical(lb.fit_transform(y_test))
+    print(y_test[0:10])
+    print(lb.classes_)
+    X_train = X_train[:,:,np.newaxis]
+    X_test = X_test[:,:,np.newaxis]
+    X_train.shape
+   
+
+def base_model():
+    print(X_train.shape)
+    print(X_test.shape)
+    dummy_clf = DummyClassifier(strategy="stratified")
+    dummy_clf.fit(X_train, y_train)
+    DummyClassifier(strategy='stratified')
+    dummy_clf.predict(X_test)
+    dummy_clf.score(X_test, y_test)
+    clf = tree.DecisionTreeClassifier()
+    clf = clf.fit(X_train, y_train)
+    clf.predict(X_test)
+    clf.score(X_test, y_test)
+    
+
+def build_model():
+    model = Sequential()
+    model.add(Conv1D(64, kernel_size=(10), activation='relu', input_shape=(X_train.shape[1],1)))
+    model.add(Conv1D(128, kernel_size=(10),activation='relu',kernel_regularizer=l2(0.01), bias_regularizer=l2(0.01)))
+    model.add(MaxPooling1D(pool_size=(8)))
+    model.add(Dropout(0.4))
+    model.add(Conv1D(128, kernel_size=(10),activation='relu'))
+    model.add(MaxPooling1D(pool_size=(8)))
+    model.add(Dropout(0.4))
+    model.add(Flatten())
+    model.add(Dense(256, activation='relu'))
+    model.add(Dropout(0.4))
+    model.add(Dense(8, activation='sigmoid'))
+    model.compile(loss='categorical_crossentropy', optimizer=tensorflow.keras.optimizers.Adam(lr=0.001),metrics=['accuracy'])
+    model.summary()
+    checkpoint = ModelCheckpoint("best_initial_model.hdf5", monitor='val_accuracy', verbose=1, save_best_only=True, mode='max', period=1, save_weights_only=True)
+    model_history = model.fit(X_train, y_train,batch_size=32, epochs=40, validation_data=(X_test, y_test),callbacks=[checkpoint])
+    return model
+
+
+def plot():
+    plt.plot(model_history.history['accuracy'])
+    plt.plot(model_history.history['val_accuracy'])
+    plt.title('Model Accuracy')
+    plt.ylabel('Accuracy')
+    plt.xlabel('Epoch')
+    plt.legend(['Train', 'Test'], loc='upper left')
+    plt.savefig('Initial_Model_Accuracy.png')
+    plt.show()
+    plt.plot(model_history.history['loss'])
+    plt.plot(model_history.history['val_loss'])
+    plt.title('Model Loss')
+    plt.ylabel('Loss')
+    plt.xlabel('Epoch')
+    plt.legend(['train', 'test'], loc='upper left')
+    plt.savefig('Initial_Model_loss.png')
+    plt.show()
